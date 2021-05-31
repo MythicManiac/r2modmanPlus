@@ -224,7 +224,7 @@ export default class Splash extends Vue {
                 this.getThunderstoreMods(attempt + 1);
             } else {
                 this.heroTitle = 'Failed to get mods from Thunderstore';
-                this.loadingText = 'You may be offline, however you may still use R2MM offline.';
+                this.loadingText = 'You may be offline, however you may still use the manager offline.';
             }
         })
     }
