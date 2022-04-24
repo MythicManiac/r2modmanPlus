@@ -14,21 +14,27 @@
         </div>
       </div>
     </div>
-    <button class="modal-close is-large" aria-label="close" @click="closeModal()"></button>
+    <button class="modal-close is-large" aria-label="close" @click="closeModal()" v-if="showClose"></button>
   </div>
 </template>
 
 <script lang="ts">
 import Vue from 'vue';
-import { Component, Watch } from 'vue-property-decorator';
+import { Component, Prop, Watch } from 'vue-property-decorator';
 
 @Component
 export default class Modal extends Vue {
 
-    open: boolean = true;
+    @Prop({default: false, type: Boolean})
+    open!: boolean;
+
+    @Prop({default: true})
+    showClose: boolean | undefined;
 
     closeModal() {
-        this.$emit('close-modal');
+        if (this.showClose) {
+            this.$emit('close-modal');
+        }
     }
 
 

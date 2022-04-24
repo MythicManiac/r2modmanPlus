@@ -1,21 +1,18 @@
-import * as path from 'path';
-import * as process from 'process';
-import * as fs from 'fs-extra';
-import PathResolver from 'src/r2mm/manager/PathResolver';
+import * as path from 'path'
+import PathResolver from '../r2mm/manager/PathResolver';
+import ProfileProvider from '../providers/ror2/model_implementation/ProfileProvider';
 
 let activeProfile: Profile;
 
 export default class Profile {
 
-    private profileName: string = '';
-    private directory: string = '.';
+    private readonly profileName: string = '';
+    private readonly directory: string = '.';
 
     public constructor(name: string) {
         this.profileName = name;
         this.directory = this.getDirectory();
-        if (!fs.existsSync(path.join(this.directory, this.profileName))) {
-            fs.mkdirsSync(path.join(this.directory, this.profileName));
-        }
+        ProfileProvider.instance.ensureProfileDirectory(this.directory, this.profileName);
         activeProfile = this;
     }
 
@@ -30,7 +27,7 @@ export default class Profile {
     }
 
     public static getDirectory(): string {
-        return path.join(PathResolver.ROOT, 'mods', 'profiles');
+        return path.join(PathResolver.MOD_ROOT, 'profiles');
     }
 
     // Directory of profile (/mods/profiles/a_profile)

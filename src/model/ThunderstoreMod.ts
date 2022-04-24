@@ -12,6 +12,9 @@ export default class ThunderstoreMod extends ThunderstoreVersion implements Reac
     private pinned: boolean = false;
     private deprecated: boolean = false;
     private totalDownloads: number = 0;
+    private categories: string[] = [];
+    private hasNsfwContent: boolean = false;
+    private donationLink: string | undefined;
 
     public parseFromThunderstoreData(data: any): ThunderstoreMod {
         this.setName(data.name);
@@ -38,6 +41,9 @@ export default class ThunderstoreMod extends ThunderstoreVersion implements Reac
                 .reduce((x, y) => x + y)
         );
         this.setPackageUrl(data.package_url);
+        this.setCategories(data.categories);
+        this.setNsfwFlag(data.has_nsfw_content);
+        this.setDonationLink(data.donation_link);
         return this;
     }
 
@@ -55,6 +61,9 @@ export default class ThunderstoreMod extends ThunderstoreVersion implements Reac
         this.setRating(reactive.rating);
         this.setTotalDownloads(reactive.totalDownloads);
         this.setUuid4(reactive.uuid4);
+        this.setCategories(reactive.categories);
+        this.setNsfwFlag(reactive.hasNsfwContent);
+        this.setDonationLink(reactive.donationUrl);
         return this;
     }
 
@@ -97,7 +106,7 @@ export default class ThunderstoreMod extends ThunderstoreVersion implements Reac
     public setDateCreated(date: Date) {
         this.dateCreated = date;
     }
-    
+
     public getDateUpdated(): Date {
         return this.dateUpdated;
     }
@@ -136,5 +145,29 @@ export default class ThunderstoreMod extends ThunderstoreVersion implements Reac
 
     public setTotalDownloads(total: number) {
         this.totalDownloads = total;
+    }
+
+    public getCategories(): string[] {
+        return this.categories;
+    }
+
+    public setCategories(categories: string[]) {
+        this.categories = categories;
+    }
+
+    public getNsfwFlag(): boolean {
+        return this.hasNsfwContent;
+    }
+
+    public setNsfwFlag(isNsfw: boolean) {
+        this.hasNsfwContent = isNsfw;
+    }
+
+    public getDonationLink(): string | undefined {
+        return this.donationLink;
+    }
+
+    public setDonationLink(url: string | undefined) {
+        this.donationLink = url;
     }
 }

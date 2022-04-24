@@ -1,42 +1,19 @@
-// app global css in SCSS form
 @charset "utf-8";
+@import "quasar.css";
 @import "fontawesome-free-5.11.2/css/all.min.css";
 
-.menu {
-    display: block;
-    padding: 1em;
-    position: sticky;
-    top: 0;
-}
+// IMPORTANT:
+// Do not use dollar signs in this file, as it causes Quasar to import its variables, which infects bulma's defaults.
+// If you need to use dollar signs, consider creating a new file that contains them and importing that file from here instead.
 
-.margin-right {
-    margin-right: 1em;
-}
+@import "scheme/light";
+@import "scheme/dark";
+@import "scheme/funky";
 
-.sticky-top {
-    position: sticky;
-    top: 0;
-    z-index: 100;
-    background-color: white;
-    padding: 1em;
-    box-shadow: 1px 1px 3px 0px lightgrey;
-}
-.sticky-top--buttons {
-    z-index: 101;
-    float: right;
-    padding: 0.7em;
-    box-shadow: 0px 0px 0px 0px transparent;
-}
+@import "~bulma";
+@import "~bulma-steps";
+@import "~bulma-divider";
+@import "~bulma-tooltip";
+@import "~bulma-slider";
 
-.border-at-bottom {
-    border-bottom: 1px solid #f5f5f5;
-}
-
-.image-parent {
-    position: relative;
-}
-.image-overlap {
-    position: absolute;
-    top: 0;
-    left: 0;
-}
+@import "custom";

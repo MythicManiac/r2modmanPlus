@@ -1,21 +1,22 @@
-import VersionNumber from "src/model/VersionNumber";
+import VersionNumber from '../../model/VersionNumber';
 
-import * as path from 'path';
 import * as yaml from 'yaml';
-import * as fs from 'fs-extra';
-import Mod from 'src/model/Mod';
-import YamlParseError from 'src/model/errors/Yaml/YamlParseError';
-import FileNotFoundError from 'src/model/errors/FileNotfoundError';
-import R2Error from 'src/model/errors/R2Error';
-import PathResolver from "../manager/PathResolver";
+import * as path from 'path';
+import Mod from '../../model/Mod';
+import YamlParseError from '../../model/errors/Yaml/YamlParseError';
+import FileNotFoundError from '../../model/errors/FileNotFoundError';
+import R2Error from '../../model/errors/R2Error';
+import PathResolver from '../manager/PathResolver';
+import FsProvider from '../../providers/generic/file/FsProvider';
 
-const cacheDirectory: string = path.join(PathResolver.ROOT, 'mods', 'cache');
+const cacheDirectory: string = path.join(PathResolver.MOD_ROOT, 'cache');
 
 export default class ModFromManifest {
-    
-    public static get(modName: string, versionNumber: VersionNumber): Mod | R2Error {
+
+    public static async get(modName: string, versionNumber: VersionNumber): Promise<Mod | R2Error> {
+        const fs = FsProvider.instance;
         try {
-            const buf: Buffer = fs.readFileSync(
+            const buf: Buffer = await fs.readFile(
                 path.join(cacheDirectory, modName, versionNumber.toString(), 'manifest.json')
             );
             try {
@@ -29,25 +30,28 @@ export default class ModFromManifest {
                 try {
                     mod.setIcon(path.join(cacheDirectory, modName, versionNumber.toString(), 'icon.png'));
                 } catch(e) {
-                    const err: Error = e;
+                    const err: Error = e as Error;
                     return new FileNotFoundError(
                         `Unable to locate icon.png for mod: ${modName}`,
-                        err.message
+                        err.message,
+                        null
                     );
                 }
                 return mod;
             } catch(e) {
-                const err: Error = e;
+                const err: Error = e as Error;
                 return new YamlParseError(
                     `Failed to parse manifest of mod: ${modName}`,
-                    err.message
+                    err.message,
+                    null
                 );
             }
         } catch(e) {
-            const err: Error = e;
+            const err: Error = e as Error;
             return new FileNotFoundError(
                 `Error reading manifest file of mod: ${modName}`,
-                err.message
+                err.message,
+                null
             );
         }
     }

@@ -8,7 +8,10 @@ import NetworkMode from './enums/NetworkMode';
 import ReactiveObjectConverterInterface from './safety/ReactiveObjectConverter';
 
 import * as path from 'path';
-import PathResolver from 'src/r2mm/manager/PathResolver';
+import PathResolver from '../r2mm/manager/PathResolver';
+import R2Error from './errors/R2Error';
+import ModBridge from '../r2mm/mods/ModBridge';
+import ThunderstorePackages from '../r2mm/data/ThunderstorePackages';
 
 export default class ManifestV2 implements ReactiveObjectConverterInterface {
 
@@ -55,8 +58,35 @@ export default class ManifestV2 implements ReactiveObjectConverterInterface {
         this.setDependencies(data.Dependencies);
         this.setIncompatibilities(data.Incompatibilities);
         this.setOptionalDependencies(data.OptionalDependencies);
-        this.setVersionNumber(new VersionNumber(data.VersionNumber));
+        this.setVersionNumber(new VersionNumber(data.Version));
         return this;
+    }
+
+    public makeSafe(data: any): R2Error | ManifestV2 {
+        if (data.ManifestVersion === undefined || data.ManifestVersion != 2) {
+            return new R2Error('Manifest is not V2', 'Manifest version is not supported',
+                'Contact the mod author to ask for a ManifestV2 zip. If they\'re unsure how, they can follow the guide here:\nhttps://github.com/ebkr/r2modmanPlus/wiki/Installing-mods-locally#developers');
+        }
+        return this.make(data);
+    }
+
+    // Intended to be used to import a mod with only minimal fields specified.
+    // Should support manifest V1. Defaults to an "Unknown" author field if not found.
+    public makeSafeFromPartial(data: any): R2Error | ManifestV2 {
+        // Safety net to ensure author and Author field aren't both undefined.
+        // (Partial should include at least one of these).
+        if (data.author !== data.AuthorName) {
+            this.setManifestVersion(2);
+            this.setAuthorName(data.AuthorName || data.author || "Unknown");
+            this.setName(data.Name || `${this.getAuthorName()}-${data.name}`);
+            this.setWebsiteUrl(data.WebsiteURL || data.website_url || "");
+            this.setDisplayName(data.DisplayName || data.name);
+            this.setDescription(data.Description || data.description || "");
+            this.setVersionNumber(new VersionNumber(data.Version || data.version_number));
+            this.setDependencies(data.Dependencies || data.dependencies || []);
+            return this;
+        }
+        return new R2Error("Manifest failed to be validated.", "The manifest is missing an author field.", "Add the author field to the manifest.json file manually.");
     }
 
     private fromUnsupported(data: any): ManifestV2 {
@@ -71,11 +101,12 @@ export default class ManifestV2 implements ReactiveObjectConverterInterface {
         this.setDescription(version.getDescription());
         this.setNetworkMode(NetworkMode.BOTH);
         this.setPackageType(PackageType.OTHER);
-        this.setInstallMode(InstallMode.EXTRACT);
+        this.setInstallMode(InstallMode.MANAGED);
         this.setDependencies(version.getDependencies());
         this.setVersionNumber(version.getVersionNumber());
         this.setWebsiteUrl(mod.getPackageUrl());
         this.setGameVersion('0');
+        this.icon = path.join(PathResolver.MOD_ROOT, 'cache', this.getName(), this.versionNumber.toString(), 'icon.png');
         return this;
     }
 
@@ -97,7 +128,7 @@ export default class ManifestV2 implements ReactiveObjectConverterInterface {
         const versionNumber = reactive.versionNumber;
         this.setVersionNumber(new VersionNumber(`${versionNumber.major}.${versionNumber.minor}.${versionNumber.patch}`));
         this.setGameVersion(reactive.gameVersion);
-        this.icon = path.join(PathResolver.ROOT, 'mods', 'cache', this.getName(), this.versionNumber.toString(), 'icon.png');
+        this.icon = path.join(PathResolver.MOD_ROOT, 'cache', this.getName(), this.versionNumber.toString(), 'icon.png');
         if (!reactive.enabled) {
             this.disable();
         }
@@ -237,4 +268,16 @@ export default class ManifestV2 implements ReactiveObjectConverterInterface {
         return this.enabled;
     }
 
+    public isDeprecated(): boolean {
+        const tsMod = ModBridge.getThunderstoreModFromMod(this, ThunderstorePackages.PACKAGES);
+        return tsMod !== undefined ? tsMod.isDeprecated() : false;
+    }
+
+    public getIcon(): string {
+        return this.icon;
+    }
+
+    public setIcon(iconUri: string) {
+        this.icon = iconUri;
+    }
 }

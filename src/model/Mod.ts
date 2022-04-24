@@ -1,6 +1,6 @@
 import VersionNumber from './VersionNumber';
 import ReactiveObjectConverterInterface from './safety/ReactiveObjectConverter';
-import ModFromManifest from 'src/r2mm/mods/ModFromManifest';
+import ModFromManifest from '../r2mm/mods/ModFromManifest';
 import R2Error from './errors/R2Error';
 
 export default class Mod implements ReactiveObjectConverterInterface {
@@ -12,8 +12,8 @@ export default class Mod implements ReactiveObjectConverterInterface {
     private icon: string = ''
     private enabled: boolean = true;
 
-    public fromManifest(): Mod | R2Error {
-        return ModFromManifest.get(this.getFullName(), this.getVersionNumber());
+    public async fromManifest(): Promise<Mod | R2Error> {
+        return await ModFromManifest.get(this.getFullName(), this.getVersionNumber());
     }
 
     public fromReactive(reactive: any): Mod {

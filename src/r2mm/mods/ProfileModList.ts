@@ -1,83 +1,120 @@
 import * as yaml from 'yaml';
-import Profile from 'src/model/Profile';
+import Profile from '../../model/Profile';
 
-import * as fs from 'fs-extra';
 import * as path from 'path';
-import FileNotFoundError from 'src/model/errors/FileNotFoundError';
-import R2Error from 'src/model/errors/R2Error';
-import YamlParseError from 'src/model/errors/Yaml/YamlParseError';
-import YamlConvertError from 'src/model/errors/Yaml/YamlConvertError';
-import FileWriteError from 'src/model/errors/FileWriteError';
-import ManifestV2 from 'src/model/ManifestV2';
-import ExportFormat from 'src/model/exports/ExportFormat';
-import ExportMod from 'src/model/exports/ExportMod';
-import { spawn } from 'child_process';
+import FsProvider from '../../providers/generic/file/FsProvider';
+import FileNotFoundError from '../../model/errors/FileNotFoundError';
+import R2Error from '../../model/errors/R2Error';
+import YamlParseError from '../../model/errors/Yaml/YamlParseError';
+import YamlConvertError from '../../model/errors/Yaml/YamlConvertError';
+import FileWriteError from '../../model/errors/FileWriteError';
+import ManifestV2 from '../../model/ManifestV2';
+import ExportFormat from '../../model/exports/ExportFormat';
+import ExportMod from '../../model/exports/ExportMod';
 import PathResolver from '../manager/PathResolver';
-import AdmZip from 'adm-zip';
+import ZipProvider from '../../providers/generic/zip/ZipProvider';
+import Axios from 'axios';
+import FileUtils from '../../utils/FileUtils';
+import ManagerInformation from '../../_managerinf/ManagerInformation';
+import LinkProvider from '../../providers/components/LinkProvider';
+import AsyncLock from 'async-lock';
+import GameManager from '../../model/game/GameManager';
+import { MOD_LOADER_VARIANTS } from '../installing/profile_installers/ModLoaderVariantRecord';
+import FileTree from '../../model/file/FileTree';
+import ZipBuilder from '../../providers/generic/zip/ZipBuilder';
+import InteractionProvider from '../../providers/ror2/system/InteractionProvider';
 
 export default class ProfileModList {
 
-    public static getModList(profile: Profile): ManifestV2[] | R2Error {
-        if (!fs.existsSync(path.join(profile.getPathOfProfile(), 'mods.yml'))) {
-            fs.writeFileSync(path.join(profile.getPathOfProfile(), 'mods.yml'), JSON.stringify([]));
+    private static lock = new AsyncLock();
+
+    public static async requestLock(fn: () => any) {
+        return this.lock.acquire("acquire", fn);
+    }
+
+    public static async getModList(profile: Profile): Promise<ManifestV2[] | R2Error> {
+        const fs = FsProvider.instance;
+        await FileUtils.ensureDirectory(profile.getPathOfProfile());
+        if (!await fs.exists(path.join(profile.getPathOfProfile(), 'mods.yml'))) {
+            await fs.writeFile(path.join(profile.getPathOfProfile(), 'mods.yml'), JSON.stringify([]));
         }
         try {
-            const buf: Buffer = fs.readFileSync(
-                path.join(profile.getPathOfProfile(), 'mods.yml')
-            );
             try {
-                const modList: ManifestV2[] = yaml.parse(buf.toString())
-                    .map((mod: ManifestV2) => new ManifestV2().fromReactive(mod));
-                return modList;
+                const value = (yaml.parse((await fs.readFile(path.join(profile.getPathOfProfile(), 'mods.yml'))).toString()) || []);
+                for(let modIndex in value){
+                    const mod = new ManifestV2().fromReactive(value[modIndex]);
+                    const fallbackPath = path.join(PathResolver.MOD_ROOT, "cache", mod.getName(), mod.getVersionNumber().toString(), "icon.png");
+                    let iconPath;
+                    if (
+                        MOD_LOADER_VARIANTS[GameManager.activeGame.internalFolderName]
+                            .find(x => x.packageName === mod.getName()) !== undefined
+                    ) // BepInEx is not a plugin, and the only place where we can get its icon is from the cache
+                        iconPath = path.resolve(profile.getPathOfProfile(), "BepInEx", "core", "icon.png");
+                    else
+                        iconPath = path.resolve(profile.getPathOfProfile(), "BepInEx", "plugins", mod.getName(), "icon.png");
+
+                    if (await fs.exists(iconPath))
+                        mod.setIcon(iconPath);
+                    else
+                        mod.setIcon(fallbackPath);
+
+                    value[modIndex] = mod;
+                }
+                return value;
             } catch(e) {
-                const err: Error = e;
+                const err: Error = e as Error;
                 return new YamlParseError(
                     `Failed to parse yaml file of profile: ${profile.getProfileName()}/mods.yml`,
-                    err.message
+                    err.message,
+                    null
                 );
             }
         } catch(e) {
-            const err: Error = e;
+            const err: Error = e as Error;
             return new FileNotFoundError(
                 'Unable to locate file',
-                err.message
+                err.message,
+                null
             )
         }
     }
 
-    private static saveModList(profile: Profile, modList: ManifestV2[]): R2Error | null {
+    public static async saveModList(profile: Profile, modList: ManifestV2[]): Promise<R2Error | null> {
+        const fs = FsProvider.instance;
         try {
             const yamlModList: string = yaml.stringify(modList);
             try {
-                fs.writeFileSync(
+                await fs.writeFile(
                     path.join(profile.getPathOfProfile(), 'mods.yml'),
                     yamlModList
                 );
             } catch(e) {
-                const err: Error = e;
+                const err: Error = e as Error;
                 return new FileWriteError(
                     `Failed to create mods.yml for profile: ${profile.getProfileName()}`,
-                    err.message
+                    err.message,
+                    `Try running ${ManagerInformation.APP_NAME} as an administrator`
                 )
             }
         } catch(e) {
-            const err: Error = e;
+            const err: Error = e as Error;
             return new YamlConvertError(
-                'Failed to convert modLiist to yaml',
-                err.message
+                'Failed to convert modList to yaml',
+                err.message,
+                null
             );
         }
         return null;
     }
 
-    public static addMod(mod: ManifestV2): ManifestV2[] | R2Error {
-        let currentModList: ManifestV2[] | R2Error = this.getModList(Profile.getActiveProfile());
+    public static async addMod(mod: ManifestV2, profile: Profile): Promise<ManifestV2[] | R2Error> {
+        let currentModList: ManifestV2[] | R2Error = await this.getModList(profile);
         if (currentModList instanceof R2Error) {
             currentModList = [];
         }
         const modIndex: number = currentModList.findIndex((search: ManifestV2) => search.getName() === mod.getName());
-        this.removeMod(mod);
-        currentModList = this.getModList(Profile.getActiveProfile());
+        await this.removeMod(mod, profile);
+        currentModList = await this.getModList(profile);
         if (currentModList instanceof R2Error) {
             currentModList = [];
         }
@@ -86,30 +123,48 @@ export default class ProfileModList {
         } else {
             currentModList.push(mod);
         }
-        const saveError: R2Error | null = this.saveModList(Profile.getActiveProfile(), currentModList);
+        const saveError: R2Error | null = await this.saveModList(profile, currentModList);
         if (saveError !== null) {
             return saveError;
         }
         // Return mod list, or R2 error. We don't care at this point as this is handled elsewhere.
-        return this.getModList(Profile.getActiveProfile());
+        return this.getModList(profile);
     }
 
-    public static removeMod(mod: ManifestV2): ManifestV2[] | R2Error {
-        const currentModList: ManifestV2[] | R2Error = this.getModList(Profile.getActiveProfile());
+    public static async removeMod(mod: ManifestV2, profile: Profile): Promise<ManifestV2[] | R2Error> {
+        const currentModList: ManifestV2[] | R2Error = await this.getModList(profile);
         if (currentModList instanceof R2Error) {
             return currentModList;
         }
         const newModList = currentModList.filter((m: ManifestV2) => m.getName() !== mod.getName());
-        const saveError: R2Error | null = this.saveModList(Profile.getActiveProfile(), newModList);
+        const saveError: R2Error | null = await this.saveModList(profile, newModList);
         if (saveError !== null) {
             return saveError;
         }
         // Return mod list, or R2 error. We don't care at this point.
-        return this.getModList(Profile.getActiveProfile());
+        return this.getModList(profile);
     }
 
-    public static updateMod(mod: ManifestV2, apply: (mod: ManifestV2) => void): ManifestV2[] | R2Error {
-        const list: ManifestV2[] | R2Error = this.getModList(Profile.getActiveProfile());
+    public static async updateMods(mods: ManifestV2[], profile: Profile, apply: (mod: ManifestV2) => void): Promise<ManifestV2[] | R2Error> {
+        const list: ManifestV2[] | R2Error = await this.getModList(profile);
+        if (list instanceof R2Error) {
+            return list;
+        }
+        for (let mod of mods) {
+            list.filter((filteringMod: ManifestV2) => filteringMod.getName() === mod.getName())
+                .forEach((filteringMod: ManifestV2) => {
+                    apply(filteringMod);
+                });
+        }
+        const saveErr = await this.saveModList(profile, list);
+        if (saveErr instanceof R2Error) {
+            return saveErr;
+        }
+        return this.getModList(profile);
+    }
+
+    public static async updateMod(mod: ManifestV2, profile: Profile, apply: (mod: ManifestV2) => void): Promise<ManifestV2[] | R2Error> {
+        const list: ManifestV2[] | R2Error = await this.getModList(profile);
         if (list instanceof R2Error) {
             return list;
         }
@@ -117,37 +172,95 @@ export default class ProfileModList {
             .forEach((filteringMod: ManifestV2) => {
                 apply(filteringMod);
             });
-        const saveErr = this.saveModList(Profile.getActiveProfile(), list);
+        const saveErr = await this.saveModList(profile, list);
         if (saveErr instanceof R2Error) {
             return saveErr;
         }
-        return this.getModList(Profile.getActiveProfile());
+        return this.getModList(profile);
     }
 
-    public static exportModList(): R2Error | void{
-        const exportDirectory = path.join(PathResolver.ROOT, 'mods', 'exports');
-        try {
-            fs.ensureDirSync(exportDirectory);
-        } catch(e) {
-            const err: Error = e;
-            return new R2Error('Failed to ensure directory exists', err.message);
-        }
-        const list: ManifestV2[] | R2Error = this.getModList(Profile.getActiveProfile());
+    private static async createExport(profile: Profile): Promise<ZipBuilder | R2Error> {
+        const list: ManifestV2[] | R2Error = await this.getModList(profile);
         if (list instanceof R2Error) {
             return list;
         }
         const exportModList: ExportMod[] = list.map((manifestMod: ManifestV2) => ExportMod.fromManifest(manifestMod));
-        const exportFormat = new ExportFormat(Profile.getActiveProfile().getProfileName(), exportModList);
-        const exportPath = path.join(exportDirectory, `${Profile.getActiveProfile().getProfileName()}.r2z`);
-        const zip = new AdmZip();
-        zip.addFile('export.r2x', Buffer.from(yaml.stringify(exportFormat)));
-        zip.addLocalFolder(path.join(Profile.getActiveProfile().getPathOfProfile(), 'BepInEx', 'config'), 'config');
-        zip.writeZip(exportPath);
-        spawn('powershell.exe', ['explorer', `/select,${exportPath}`]);
+        const exportFormat = new ExportFormat(profile.getProfileName(), exportModList);
+        const builder = ZipProvider.instance.zipBuilder();
+        await builder.addBuffer("export.r2x", Buffer.from(yaml.stringify(exportFormat)));
+        if (await FsProvider.instance.exists(path.join(profile.getPathOfProfile(), "BepInEx", "config"))) {
+            await builder.addFolder("config", path.join(profile.getPathOfProfile(), 'BepInEx', 'config'));
+        }
+        const tree = await FileTree.buildFromLocation(profile.getPathOfProfile());
+        if (tree instanceof R2Error) {
+            return tree;
+        }
+        tree.navigateAndPerform(bepInExDir => {
+            bepInExDir.removeDirectories("config");
+            bepInExDir.navigateAndPerform(pluginDir => {
+                pluginDir.getDirectories().forEach(value => value.removeFiles(path.join(profile.getPathOfProfile(), "BepInEx", "plugins", value.getDirectoryName(), "manifest.json")));
+            }, "plugins");
+        }, "BepInEx");
+        tree.removeDirectories("MelonLoader");
+        // Add all tree contents to buffer.
+        for (const file of tree.getRecursiveFiles()) {
+            const fileLower = file.toLowerCase();
+            if (fileLower.endsWith(".cfg") || fileLower.endsWith(".txt") || fileLower.endsWith(".json")) {
+                await builder.addBuffer(path.relative(profile.getPathOfProfile(), file), await FsProvider.instance.readFile(file));
+            }
+        }
+        return builder;
     }
 
-    public static shiftModEntryUp(mod: ManifestV2): ManifestV2[] | R2Error {
-        let list: ManifestV2[] | R2Error = this.getModList(Profile.getActiveProfile());
+    public static async exportModListToFile(profile: Profile): Promise<R2Error | string> {
+        const exportDirectory = path.join(PathResolver.MOD_ROOT, 'exports');
+        try {
+            await FileUtils.ensureDirectory(exportDirectory);
+        } catch(e) {
+            const err: Error = e as Error;
+            return new R2Error('Failed to ensure directory exists', err.message,
+                `Try running ${ManagerInformation.APP_NAME} as an administrator`);
+        }
+        const dir = await InteractionProvider.instance.selectFolder({
+            title: `Select the location to export your profile to`,
+            defaultPath: exportDirectory,
+            buttonLabel: 'Select export directory'
+        });
+        if (dir.length === 0) {
+            return new R2Error("Failed to export profile", "No export directory was selected", null);
+        }
+        const builder = await this.createExport(profile);
+        if (builder instanceof R2Error) {
+            return builder;
+        }
+        const exportPath = path.join(dir[0], `${profile.getProfileName()}_${new Date().getTime()}.r2z`);
+        await builder.createZip(exportPath);
+        LinkProvider.instance.selectFile(exportPath);
+        return exportPath;
+    }
+
+    public static async exportModListAsCode(profile: Profile, callback: (code: string, err: R2Error | null) => void): Promise<R2Error | void> {
+        const fs = FsProvider.instance;
+        const exportDirectory = path.join(PathResolver.MOD_ROOT, 'exports');
+        await FileUtils.ensureDirectory(exportDirectory);
+        const exportPath = path.join(exportDirectory, `${profile.getProfileName()}.r2z`);
+        const exportBuilder: R2Error | ZipBuilder = await this.createExport(profile);
+        if (exportBuilder instanceof R2Error) {
+            return exportBuilder;
+        } else {
+            await exportBuilder.createZip(exportPath);
+            const profileBuffer = '#r2modman\n' + (await fs.base64FromZip(exportPath));
+            Axios.post('https://r2modman-hastebin.herokuapp.com/documents', profileBuffer)
+                .then(resp => callback(resp.data.key, null))
+                .catch(e => {
+                    const err: Error = e;
+                    callback('', new R2Error('Failed to export profile', err.message, null));
+                });
+        }
+    }
+
+    public static async shiftModEntryUp(mod: ManifestV2, profile: Profile): Promise<ManifestV2[] | R2Error> {
+        let list: ManifestV2[] | R2Error = await this.getModList(profile);
         if (list instanceof R2Error) {
             return list;
         }
@@ -160,15 +273,15 @@ export default class ProfileModList {
             const end = list.slice(index - 1);
             list = [...start, mod, ...end];
         }
-        const saveErr = this.saveModList(Profile.getActiveProfile(), list);
+        const saveErr = await this.saveModList(profile, list);
         if (saveErr instanceof R2Error) {
             return saveErr;
         }
-        return this.getModList(Profile.getActiveProfile());
+        return this.getModList(profile);
     }
 
-    public static shiftModEntryDown(mod: ManifestV2): ManifestV2[] | R2Error {
-        let list: ManifestV2[] | R2Error = this.getModList(Profile.getActiveProfile());
+    public static async shiftModEntryDown(mod: ManifestV2, profile: Profile): Promise<ManifestV2[] | R2Error> {
+        let list: ManifestV2[] | R2Error = await this.getModList(profile);
         if (list instanceof R2Error) {
             return list;
         }
@@ -181,11 +294,15 @@ export default class ProfileModList {
             const end = list.slice(index + 1);
             list = [...start, mod, ...end];
         }
-        const saveErr = this.saveModList(Profile.getActiveProfile(), list);
+        const saveErr = await this.saveModList(profile, list);
         if (saveErr instanceof R2Error) {
             return saveErr;
         }
-        return this.getModList(Profile.getActiveProfile());
+        return this.getModList(profile);
+    }
+
+    public static getDisabledModCount(modList: ManifestV2[]): number {
+        return modList.filter(value => !value.isEnabled()).length;
     }
 
 }
