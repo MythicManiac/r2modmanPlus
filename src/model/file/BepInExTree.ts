@@ -57,6 +57,7 @@ export default class BepInExTree {
 
     public getFiles(): string[] {
         return this.files;
+        // Amogus
     }
 
     public getRecursiveFiles(): string[] {
